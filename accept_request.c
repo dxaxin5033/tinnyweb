@@ -10,18 +10,41 @@
 #include<strings.h>
 #include<string.h>
 #include"accept_request.h"
-#include"server_dynamic.h"
-#include"get_line.h"
 #define BUFSIZE 1024
 #define SERVER_STRING "Server: jdbhttpd/0.1.0\r\n"
+int get_line(int sock, char*buf, int size);
 void serve_file(int client, const char *filename);
 void * accept_request(void * arg);
 void cat(int client, FILE *file);
 void headers(int client,const char *filename);
 void not_found(int client);
 void unimplemented(int client);
-
-
+int get_line(int sock, char*buf, int size)                                         
+{
+    int i=0;
+    char c='\0';
+    int n;
+    while((i<size-1)&&(c!='\n'))
+    {
+        n= recv(sock,&c,1,0);
+        if(n>0)
+        {
+            if(c=='\r')
+            {
+                n= recv(sock,&c,1,MSG_PEEK);                                       
+                if((n>0)&&(c=='\n'))
+                    recv(sock,&c,1,0);
+                else
+                    c='\n';
+            }
+            buf[i]=c;
+            i++;
+        }else
+            c='\n';
+    }
+    buf[i]='\0';
+    return i;
+}   
 void serve_file(int client, const char *filename)
 {   
     FILE *source=NULL;
@@ -55,14 +78,14 @@ void cat(int client, FILE *file)
 }                                                                                  
 void * accept_request(void * arg)
 {
-    int rlen, i, j,cgi=0;
+    int rlen, i, j;
  info * clientinfo=(info *) arg;
     char method[255];
     char uri[255];
     char path[255];
     char strip[128];
     char buf[BUFSIZE];
-    char *clientip, *query_string='\0';
+    char *clientip;
     struct stat st;
     clientip=inet_ntop(AF_INET,&clientinfo->skaddr.sin_addr.s_addr,strip,sizeof(strip));
     printf("client ip %s\t port %d\n",clientip,ntohs(clientinfo->skaddr.sin_port));     
@@ -75,15 +98,13 @@ void * accept_request(void * arg)
     }
     method[j]='\0';
     printf("mothod: %s\n",method);
-    if(strcasecmp(method, "GET")&&strcasecmp(method, "POST"))
+    if(strcasecmp(method, "GET"))
     {
         unimplemented(clientinfo->cfd);                                            
         return;
     }
-	if(strcasecmp(method,"POST")==0)
-		cgi=1;
     j=0;
-    while(isspace(buf[i])&&(i<sizeof(buf)-1))
+ while(isspace(buf[i])&&(i<sizeof(buf)-1))
         i++;
     
     while((!isspace(buf[i]))&&(j<sizeof(uri)-1))
@@ -92,29 +113,6 @@ void * accept_request(void * arg)
         i++; j++;
     }
     uri[j]='\0';
-	/***********************
-	 *
-	 * read request
-	 * *******************/
-
-	if(strcasecmp(method,"GET")==0)
-	{
-		query_string=uri;
-		while(*query_string != '?'&&*query_string != '\0')
-			query_string++;
-		if(*query_string=='?')
-		{
-			cgi=1;
-			*query_string='\0';
-			query_string++;
-		}
-	}
-	/*************************
-	 *
-	 *read cgi argvs
-	 ****************************/
-
-
     sprintf(path,"htdocs%s",uri);
     printf("path:%s\n",path);
     if((path[strlen(path)-1])=='/')
@@ -128,13 +126,7 @@ void * accept_request(void * arg)
     {
         if((st.st_mode & S_IFMT)==S_IFDIR)
             strcat(path,"/index.html");
-		if((st.st_mode & S_IXUSR)||(st.st_mode & S_IXGRP)||
-				(st.st_mode & S_IXOTH))
-			cgi=1;
-		if(!cgi)
-			serve_file(clientinfo->cfd,path);
-		else
-			server_dynamic(clientinfo->cfd,path,query_string,method);
+        serve_file(clientinfo->cfd,path);
     }                                                                              
 
     close(clientinfo->cfd);
